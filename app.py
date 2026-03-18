@@ -5,7 +5,6 @@ from flask_sqlalchemy import SQLAlchemy
 app = Flask(__name__)
 CORS(app)
 
-# ✅ SQLite DB
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///startup.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -24,7 +23,6 @@ class User(db.Model):
     college = db.Column(db.String(100))
     skills = db.Column(db.String(200))
     status = db.Column(db.String(50))
-    profileCompleted = db.Column(db.Boolean, default=True)
 
 
 class Idea(db.Model):
@@ -49,6 +47,19 @@ class Chat(db.Model):
     message = db.Column(db.String(500))
 
 
+# 👥 GROUP CHAT
+class Group(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100))
+
+
+class GroupMessage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    groupId = db.Column(db.Integer)
+    sender = db.Column(db.String(100))
+    message = db.Column(db.String(500))
+
+
 # =========================
 # 🔐 AUTH
 # =========================
@@ -61,16 +72,13 @@ def register():
         name=data["name"],
         email=data["email"],
         password=data["password"],
-        phone=data.get("phone"),
-        college=data.get("college"),
         skills=data.get("skills"),
-        status=data.get("status"),
     )
 
     db.session.add(user)
     db.session.commit()
 
-    return jsonify({"message": "Registered successfully"})
+    return jsonify({"message": "Registered"})
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -86,15 +94,10 @@ def login():
         return jsonify({
             "id": user.id,
             "name": user.name,
-            "email": user.email,
-            "phone": user.phone,
-            "college": user.college,
-            "skills": user.skills,
-            "status": user.status,
-            "profileCompleted": user.profileCompleted
+            "skills": user.skills
         })
-    else:
-        return jsonify({"error": "Invalid login"}), 401
+
+    return jsonify({"error": "Invalid"}), 401
 
 
 # =========================
@@ -124,33 +127,15 @@ def get_ideas():
 
     result = []
     for i in ideas:
+        user = User.query.get(i.userId)
+
         result.append({
             "id": i.id,
             "title": i.title,
             "description": i.description,
             "skills": i.skills,
-            "userId": i.userId
-        })
-
-    return jsonify(result)
-
-
-# =========================
-# 🔍 SEARCH USERS
-# =========================
-
-@app.route("/api/user/search", methods=["GET"])
-def search_users():
-    skill = request.args.get("skill", "")
-
-    users = User.query.filter(User.skills.like(f"%{skill}%")).all()
-
-    result = []
-    for u in users:
-        result.append({
-            "id": u.id,
-            "name": u.name,
-            "skills": u.skills
+            "userId": i.userId,
+            "userName": user.name if user else "Unknown"
         })
 
     return jsonify(result)
@@ -161,7 +146,7 @@ def search_users():
 # =========================
 
 @app.route("/api/request/join", methods=["POST"])
-def request_join():
+def join():
     data = request.json
 
     req = Request(
@@ -175,12 +160,60 @@ def request_join():
     return jsonify({"message": "Request sent"})
 
 
+@app.route("/api/request/incoming/<int:user_id>", methods=["GET"])
+def incoming(user_id):
+    ideas = Idea.query.filter_by(userId=user_id).all()
+    ids = [i.id for i in ideas]
+
+    requests = Request.query.filter(Request.ideaId.in_(ids)).all()
+
+    result = []
+    for r in requests:
+        user = User.query.get(r.userId)
+
+        result.append({
+            "requestId": r.id,
+            "userName": user.name,
+            "status": r.status
+        })
+
+    return jsonify(result)
+
+
+@app.route("/api/request/update/<int:id>", methods=["PUT"])
+def update_req(id):
+    data = request.json
+
+    req = Request.query.get(id)
+    req.status = data["status"]
+
+    db.session.commit()
+
+    return jsonify({"message": "Updated"})
+
+
 # =========================
-# 💬 CHAT
+# 👤 PROFILE
+# =========================
+
+@app.route("/api/user/<int:id>", methods=["GET"])
+def profile(id):
+    user = User.query.get(id)
+
+    return jsonify({
+        "name": user.name,
+        "skills": user.skills,
+        "college": user.college,
+        "status": user.status
+    })
+
+
+# =========================
+# 💬 PRIVATE CHAT
 # =========================
 
 @app.route("/api/chat/send", methods=["POST"])
-def send_message():
+def send():
     data = request.json
 
     msg = Chat(
@@ -192,48 +225,65 @@ def send_message():
     db.session.add(msg)
     db.session.commit()
 
-    return jsonify({"message": "Message sent"})
+    return jsonify({"message": "Sent"})
 
 
-@app.route("/api/chat/<user1>/<user2>", methods=["GET"])
-def get_chat(user1, user2):
-    messages = Chat.query.filter(
-        ((Chat.sender == user1) & (Chat.receiver == user2)) |
-        ((Chat.sender == user2) & (Chat.receiver == user1))
+@app.route("/api/chat/<u1>/<u2>", methods=["GET"])
+def chat(u1, u2):
+    msgs = Chat.query.filter(
+        ((Chat.sender == u1) & (Chat.receiver == u2)) |
+        ((Chat.sender == u2) & (Chat.receiver == u1))
     ).all()
 
-    result = []
-    for m in messages:
-        result.append({
-            "from": m.sender,
-            "to": m.receiver,
-            "message": m.message
-        })
+    return jsonify([
+        {"from": m.sender, "message": m.message}
+        for m in msgs
+    ])
 
-    return jsonify(result)
 
 # =========================
-# ✏️ UPDATE PROFILE
+# 👥 GROUP CHAT
 # =========================
 
-@app.route("/api/user/update/<int:user_id>", methods=["PUT"])
-def update_user(user_id):
+@app.route("/api/group/create", methods=["POST"])
+def create_group():
     data = request.json
 
-    user = User.query.get(user_id)
-
-    if not user:
-        return jsonify({"error": "User not found"}), 404
-
-    user.name = data.get("name", user.name)
-    user.phone = data.get("phone", user.phone)
-    user.college = data.get("college", user.college)
-    user.skills = data.get("skills", user.skills)
-    user.status = data.get("status", user.status)
-
+    g = Group(name=data["name"])
+    db.session.add(g)
     db.session.commit()
 
-    return jsonify({"message": "Profile updated successfully"})
+    return jsonify({"groupId": g.id})
+
+
+@app.route("/api/group/send", methods=["POST"])
+def group_send():
+    data = request.json
+
+    msg = GroupMessage(
+        groupId=data["groupId"],
+        sender=data["sender"],
+        message=data["message"]
+    )
+
+    db.session.add(msg)
+    db.session.commit()
+
+    return jsonify({"message": "Sent"})
+
+
+@app.route("/api/group/<int:id>", methods=["GET"])
+def group_chat(id):
+    msgs = GroupMessage.query.filter_by(groupId=id).all()
+
+    return jsonify([
+        {"sender": m.sender, "message": m.message}
+        for m in msgs
+    ])
+
+
+# =========================
+# 🚀 RUN
 # =========================
 
 if __name__ == "__main__":
