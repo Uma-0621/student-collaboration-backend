@@ -100,7 +100,8 @@ def login():
             "phone": user.phone,
             "college": user.college,
             "skills": user.skills,
-            "status": user.status
+            "status": user.status,
+            "profileCompleted": True
         })
 
     return jsonify({"error": "Invalid"}), 401
