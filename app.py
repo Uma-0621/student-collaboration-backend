@@ -280,7 +280,28 @@ def group_chat(id):
         {"sender": m.sender, "message": m.message}
         for m in msgs
     ])
+# =========================
+# ✏️ UPDATE PROFILE (MISSING API)
+# =========================
 
+@app.route("/api/user/update/<int:user_id>", methods=["PUT"])
+def update_user(user_id):
+    data = request.json
+
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    user.name = data.get("name", user.name)
+    user.phone = data.get("phone", user.phone)
+    user.college = data.get("college", user.college)
+    user.skills = data.get("skills", user.skills)
+    user.status = data.get("status", user.status)
+
+    db.session.commit()
+
+    return jsonify({"message": "Profile updated successfully"})
 
 # =========================
 # 🚀 RUN
