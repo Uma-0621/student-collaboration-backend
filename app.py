@@ -96,12 +96,14 @@ def login():
         return jsonify({
             "id": user.id,
             "name": user.name,
-            "email": user.email,  # ✅ FIX
+            "email": user.email,
             "phone": user.phone,
             "college": user.college,
             "skills": user.skills,
             "status": user.status,
-            "profileCompleted": True
+
+            # 🔥 AUTO CHECK PROFILE
+            "profileCompleted": True if user.phone and user.college else False
         })
 
     return jsonify({"error": "Invalid"}), 401
@@ -208,12 +210,16 @@ def profile(id):
     user = User.query.get(id)
 
     return jsonify({
+        "id": user.id,
         "name": user.name,
-        "email": user.email,   # ✅ FIX
+        "email": user.email,
         "phone": user.phone,
         "college": user.college,
         "skills": user.skills,
-        "status": user.status
+        "status": user.status,
+
+        # 🔥 keep consistent
+        "profileCompleted": True if user.phone and user.college else False
     })
 
 
@@ -231,7 +237,7 @@ def update_user(user_id):
         return jsonify({"error": "User not found"}), 404
 
     user.name = data.get("name", user.name)
-    user.email = data.get("email", user.email)  # ✅ FIX
+    user.email = data.get("email", user.email)
     user.phone = data.get("phone", user.phone)
     user.college = data.get("college", user.college)
     user.skills = data.get("skills", user.skills)
@@ -239,7 +245,21 @@ def update_user(user_id):
 
     db.session.commit()
 
-    return jsonify({"message": "Profile updated successfully"})
+    return jsonify({
+        "message": "Profile updated successfully",
+
+        # 🔥 return updated user also
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "phone": user.phone,
+            "college": user.college,
+            "skills": user.skills,
+            "status": user.status,
+            "profileCompleted": True if user.phone and user.college else False
+        }
+    })
 
 
 # =========================
