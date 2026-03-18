@@ -40,10 +40,11 @@ class Request(db.Model):
     status = db.Column(db.String(50), default="pending")
 
 
+# ---- Chat model uses Integer ids for sender/receiver (recommended) ----
 class Chat(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    sender = db.Column(db.String(100))
-    receiver = db.Column(db.String(100))
+    sender = db.Column(db.Integer)     # integer user id
+    receiver = db.Column(db.Integer)   # integer user id
     message = db.Column(db.String(500))
 
 
@@ -80,7 +81,7 @@ def register():
     db.session.add(user)
     db.session.commit()
 
-    return jsonify({"message": "Registered"})
+    return jsonify({"message": "Registered"}), 201
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -101,7 +102,6 @@ def login():
             "college": user.college,
             "skills": user.skills,
             "status": user.status,
-
             # 🔥 AUTO CHECK PROFILE
             "profileCompleted": True if user.phone and user.college else False
         })
@@ -120,14 +120,14 @@ def create_idea():
     idea = Idea(
         title=data["title"],
         description=data["description"],
-        skills=data["skills"],
-        userId=data["userId"]
+        skills=data.get("skills"),
+        userId=int(data["userId"])
     )
 
     db.session.add(idea)
     db.session.commit()
 
-    return jsonify({"message": "Idea created"})
+    return jsonify({"message": "Idea created"}), 201
 
 
 @app.route("/api/idea/all", methods=["GET"])
@@ -159,14 +159,14 @@ def join():
     data = request.json
 
     req = Request(
-        ideaId=data["ideaId"],
-        userId=data["userId"]
+        ideaId=int(data["ideaId"]),
+        userId=int(data["userId"])
     )
 
     db.session.add(req)
     db.session.commit()
 
-    return jsonify({"message": "Request sent"})
+    return jsonify({"message": "Request sent"}), 201
 
 
 @app.route("/api/request/incoming/<int:user_id>", methods=["GET"])
@@ -182,7 +182,7 @@ def incoming(user_id):
 
         result.append({
             "requestId": r.id,
-            "userName": user.name,
+            "userName": user.name if user else "Unknown",
             "status": r.status
         })
 
@@ -194,7 +194,10 @@ def update_req(id):
     data = request.json
 
     req = Request.query.get(id)
-    req.status = data["status"]
+    if not req:
+        return jsonify({"error": "Request not found"}), 404
+
+    req.status = data.get("status", req.status)
 
     db.session.commit()
 
@@ -208,6 +211,8 @@ def update_req(id):
 @app.route("/api/user/<int:id>", methods=["GET"])
 def profile(id):
     user = User.query.get(id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
 
     return jsonify({
         "id": user.id,
@@ -217,7 +222,6 @@ def profile(id):
         "college": user.college,
         "skills": user.skills,
         "status": user.status,
-
         # 🔥 keep consistent
         "profileCompleted": True if user.phone and user.college else False
     })
@@ -247,7 +251,6 @@ def update_user(user_id):
 
     return jsonify({
         "message": "Profile updated successfully",
-
         # 🔥 return updated user also
         "user": {
             "id": user.id,
@@ -270,27 +273,53 @@ def update_user(user_id):
 def send():
     data = request.json
 
+    # Validate presence
+    if "from" not in data or "to" not in data or "message" not in data:
+        return jsonify({"error": "Invalid payload"}), 400
+
+    try:
+        sender_id = int(data["from"])
+        receiver_id = int(data["to"])
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid user ids"}), 400
+
+    # Optional: verify users exist (uncomment if desired)
+    # if not User.query.get(sender_id) or not User.query.get(receiver_id):
+    #     return jsonify({"error": "User not found"}), 404
+
     msg = Chat(
-        sender=data["from"],
-        receiver=data["to"],
+        sender=sender_id,
+        receiver=receiver_id,
         message=data["message"]
     )
 
     db.session.add(msg)
     db.session.commit()
 
-    return jsonify({"message": "Sent"})
+    return jsonify({"message": "Sent"}), 201
 
 
 @app.route("/api/chat/<u1>/<u2>", methods=["GET"])
 def chat(u1, u2):
+    # Convert to integer IDs (important for querying integer columns)
+    try:
+        a = int(u1)
+        b = int(u2)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid user ids"}), 400
+
     msgs = Chat.query.filter(
-        ((Chat.sender == u1) & (Chat.receiver == u2)) |
-        ((Chat.sender == u2) & (Chat.receiver == u1))
-    ).all()
+        ((Chat.sender == a) & (Chat.receiver == b)) |
+        ((Chat.sender == b) & (Chat.receiver == a))
+    ).order_by(Chat.id).all()
 
     return jsonify([
-        {"from": m.sender, "message": m.message}
+        {
+            "id": m.id,
+            "from": m.sender,
+            "to": m.receiver,
+            "message": m.message
+        }
         for m in msgs
     ])
 
@@ -307,7 +336,7 @@ def create_group():
     db.session.add(g)
     db.session.commit()
 
-    return jsonify({"groupId": g.id})
+    return jsonify({"groupId": g.id}), 201
 
 
 @app.route("/api/group/send", methods=["POST"])
@@ -315,7 +344,7 @@ def group_send():
     data = request.json
 
     msg = GroupMessage(
-        groupId=data["groupId"],
+        groupId=int(data["groupId"]),
         sender=data["sender"],
         message=data["message"]
     )
@@ -323,12 +352,12 @@ def group_send():
     db.session.add(msg)
     db.session.commit()
 
-    return jsonify({"message": "Sent"})
+    return jsonify({"message": "Sent"}), 201
 
 
 @app.route("/api/group/<int:id>", methods=["GET"])
 def group_chat(id):
-    msgs = GroupMessage.query.filter_by(groupId=id).all()
+    msgs = GroupMessage.query.filter_by(groupId=id).order_by(GroupMessage.id).all()
 
     return jsonify([
         {"sender": m.sender, "message": m.message}
@@ -342,6 +371,11 @@ def group_chat(id):
 
 if __name__ == "__main__":
     with app.app_context():
+        # If you're switching from string-based sender/receiver to integers,
+        # you MUST reset the DB (drop_all + create_all) to update column types.
+        # Uncomment the next line to reset the DB (this will erase existing data):
+        # db.drop_all()
+
         db.create_all()
 
     app.run(debug=True)
