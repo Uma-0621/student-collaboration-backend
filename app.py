@@ -47,7 +47,6 @@ class Chat(db.Model):
     message = db.Column(db.String(500))
 
 
-# 👥 GROUP CHAT
 class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100))
@@ -72,7 +71,10 @@ def register():
         name=data["name"],
         email=data["email"],
         password=data["password"],
+        phone=data.get("phone"),
+        college=data.get("college"),
         skills=data.get("skills"),
+        status=data.get("status"),
     )
 
     db.session.add(user)
@@ -94,7 +96,11 @@ def login():
         return jsonify({
             "id": user.id,
             "name": user.name,
-            "skills": user.skills
+            "email": user.email,  # ✅ FIX
+            "phone": user.phone,
+            "college": user.college,
+            "skills": user.skills,
+            "status": user.status
         })
 
     return jsonify({"error": "Invalid"}), 401
@@ -142,7 +148,7 @@ def get_ideas():
 
 
 # =========================
-# 👥 JOIN REQUEST
+# 👥 REQUESTS
 # =========================
 
 @app.route("/api/request/join", methods=["POST"])
@@ -202,10 +208,37 @@ def profile(id):
 
     return jsonify({
         "name": user.name,
-        "skills": user.skills,
+        "email": user.email,   # ✅ FIX
+        "phone": user.phone,
         "college": user.college,
+        "skills": user.skills,
         "status": user.status
     })
+
+
+# =========================
+# ✏️ UPDATE PROFILE
+# =========================
+
+@app.route("/api/user/update/<int:user_id>", methods=["PUT"])
+def update_user(user_id):
+    data = request.json
+
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    user.name = data.get("name", user.name)
+    user.email = data.get("email", user.email)  # ✅ FIX
+    user.phone = data.get("phone", user.phone)
+    user.college = data.get("college", user.college)
+    user.skills = data.get("skills", user.skills)
+    user.status = data.get("status", user.status)
+
+    db.session.commit()
+
+    return jsonify({"message": "Profile updated successfully"})
 
 
 # =========================
@@ -280,28 +313,7 @@ def group_chat(id):
         {"sender": m.sender, "message": m.message}
         for m in msgs
     ])
-# =========================
-# ✏️ UPDATE PROFILE (MISSING API)
-# =========================
 
-@app.route("/api/user/update/<int:user_id>", methods=["PUT"])
-def update_user(user_id):
-    data = request.json
-
-    user = User.query.get(user_id)
-
-    if not user:
-        return jsonify({"error": "User not found"}), 404
-
-    user.name = data.get("name", user.name)
-    user.phone = data.get("phone", user.phone)
-    user.college = data.get("college", user.college)
-    user.skills = data.get("skills", user.skills)
-    user.status = data.get("status", user.status)
-
-    db.session.commit()
-
-    return jsonify({"message": "Profile updated successfully"})
 
 # =========================
 # 🚀 RUN
