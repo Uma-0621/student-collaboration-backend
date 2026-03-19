@@ -387,7 +387,28 @@ def group_chat(id):
         for m in msgs
     ])
 
+# =========================
+# 👥 GET ALL USERS
+# =========================
 
+@app.route("/api/user/all", methods=["GET"])
+def get_all_users():
+    users = User.query.all()
+
+    result = []
+    for user in users:
+        result.append({
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "phone": user.phone,
+            "college": user.college,
+            "skills": user.skills,
+            "status": user.status,
+            "profileCompleted": True if user.phone and user.college else False
+        })
+
+    return jsonify(result)
 # =========================
 # 🚀 RUN
 # =========================
