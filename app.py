@@ -1,12 +1,13 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///startup.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///startup.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
@@ -40,12 +41,12 @@ class Request(db.Model):
     status = db.Column(db.String(50), default="pending")
 
 
-# ---- Chat model uses Integer ids for sender/receiver (recommended) ----
 class Chat(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    sender = db.Column(db.Integer)     # integer user id
-    receiver = db.Column(db.Integer)   # integer user id
-    message = db.Column(db.String(500))
+    sender = db.Column(db.Integer, nullable=False)
+    receiver = db.Column(db.Integer, nullable=False)
+    message = db.Column(db.String(500), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class Group(db.Model):
@@ -55,9 +56,10 @@ class Group(db.Model):
 
 class GroupMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    groupId = db.Column(db.Integer)
-    sender = db.Column(db.String(100))
-    message = db.Column(db.String(500))
+    groupId = db.Column(db.Integer, nullable=False)
+    sender = db.Column(db.String(100), nullable=False)
+    message = db.Column(db.String(500), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 # =========================
@@ -67,6 +69,13 @@ class GroupMessage(db.Model):
 @app.route("/api/auth/register", methods=["POST"])
 def register():
     data = request.json
+
+    if not data.get("name") or not data.get("email") or not data.get("password"):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    existing = User.query.filter_by(email=data["email"]).first()
+    if existing:
+        return jsonify({"error": "Email already exists"}), 409
 
     user = User(
         name=data["name"],
@@ -89,8 +98,8 @@ def login():
     data = request.json
 
     user = User.query.filter_by(
-        email=data["email"],
-        password=data["password"]
+        email=data.get("email"),
+        password=data.get("password")
     ).first()
 
     if user:
@@ -102,7 +111,6 @@ def login():
             "college": user.college,
             "skills": user.skills,
             "status": user.status,
-            # 🔥 AUTO CHECK PROFILE
             "profileCompleted": True if user.phone and user.college else False
         })
 
@@ -116,6 +124,9 @@ def login():
 @app.route("/api/idea/create", methods=["POST"])
 def create_idea():
     data = request.json
+
+    if not data.get("title") or not data.get("description") or not data.get("userId"):
+        return jsonify({"error": "Missing required fields"}), 400
 
     idea = Idea(
         title=data["title"],
@@ -137,7 +148,6 @@ def get_ideas():
     result = []
     for i in ideas:
         user = User.query.get(i.userId)
-
         result.append({
             "id": i.id,
             "title": i.title,
@@ -157,6 +167,9 @@ def get_ideas():
 @app.route("/api/request/join", methods=["POST"])
 def join():
     data = request.json
+
+    if not data.get("ideaId") or not data.get("userId"):
+        return jsonify({"error": "Missing required fields"}), 400
 
     req = Request(
         ideaId=int(data["ideaId"]),
@@ -179,7 +192,6 @@ def incoming(user_id):
     result = []
     for r in requests:
         user = User.query.get(r.userId)
-
         result.append({
             "requestId": r.id,
             "userName": user.name if user else "Unknown",
@@ -198,7 +210,6 @@ def update_req(id):
         return jsonify({"error": "Request not found"}), 404
 
     req.status = data.get("status", req.status)
-
     db.session.commit()
 
     return jsonify({"message": "Updated"})
@@ -222,21 +233,15 @@ def profile(id):
         "college": user.college,
         "skills": user.skills,
         "status": user.status,
-        # 🔥 keep consistent
         "profileCompleted": True if user.phone and user.college else False
     })
 
-
-# =========================
-# ✏️ UPDATE PROFILE
-# =========================
 
 @app.route("/api/user/update/<int:user_id>", methods=["PUT"])
 def update_user(user_id):
     data = request.json
 
     user = User.query.get(user_id)
-
     if not user:
         return jsonify({"error": "User not found"}), 404
 
@@ -251,7 +256,6 @@ def update_user(user_id):
 
     return jsonify({
         "message": "Profile updated successfully",
-        # 🔥 return updated user also
         "user": {
             "id": user.id,
             "name": user.name,
@@ -273,7 +277,6 @@ def update_user(user_id):
 def send():
     data = request.json
 
-    # Validate presence
     if "from" not in data or "to" not in data or "message" not in data:
         return jsonify({"error": "Invalid payload"}), 400
 
@@ -283,25 +286,33 @@ def send():
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid user ids"}), 400
 
-    # Optional: verify users exist (uncomment if desired)
-    # if not User.query.get(sender_id) or not User.query.get(receiver_id):
-    #     return jsonify({"error": "User not found"}), 404
+    msg_text = str(data["message"]).strip()
+    if not msg_text:
+        return jsonify({"error": "Message cannot be empty"}), 400
 
     msg = Chat(
         sender=sender_id,
         receiver=receiver_id,
-        message=data["message"]
+        message=msg_text
     )
 
     db.session.add(msg)
     db.session.commit()
 
-    return jsonify({"message": "Sent"}), 201
+    return jsonify({
+        "message": "Sent",
+        "data": {
+            "id": msg.id,
+            "from": msg.sender,
+            "to": msg.receiver,
+            "message": msg.message,
+            "timestamp": msg.timestamp.isoformat()
+        }
+    }), 201
 
 
 @app.route("/api/chat/<u1>/<u2>", methods=["GET"])
 def chat(u1, u2):
-    # Convert to integer IDs (important for querying integer columns)
     try:
         a = int(u1)
         b = int(u2)
@@ -311,14 +322,15 @@ def chat(u1, u2):
     msgs = Chat.query.filter(
         ((Chat.sender == a) & (Chat.receiver == b)) |
         ((Chat.sender == b) & (Chat.receiver == a))
-    ).order_by(Chat.id).all()
+    ).order_by(Chat.timestamp.asc()).all()
 
     return jsonify([
         {
             "id": m.id,
             "from": m.sender,
             "to": m.receiver,
-            "message": m.message
+            "message": m.message,
+            "timestamp": m.timestamp.isoformat()
         }
         for m in msgs
     ])
@@ -332,6 +344,9 @@ def chat(u1, u2):
 def create_group():
     data = request.json
 
+    if not data.get("name"):
+        return jsonify({"error": "Group name required"}), 400
+
     g = Group(name=data["name"])
     db.session.add(g)
     db.session.commit()
@@ -343,10 +358,13 @@ def create_group():
 def group_send():
     data = request.json
 
+    if not data.get("groupId") or not data.get("sender") or not data.get("message"):
+        return jsonify({"error": "Missing required fields"}), 400
+
     msg = GroupMessage(
         groupId=int(data["groupId"]),
-        sender=data["sender"],
-        message=data["message"]
+        sender=str(data["sender"]),
+        message=str(data["message"])
     )
 
     db.session.add(msg)
@@ -357,10 +375,15 @@ def group_send():
 
 @app.route("/api/group/<int:id>", methods=["GET"])
 def group_chat(id):
-    msgs = GroupMessage.query.filter_by(groupId=id).order_by(GroupMessage.id).all()
+    msgs = GroupMessage.query.filter_by(groupId=id).order_by(GroupMessage.timestamp.asc()).all()
 
     return jsonify([
-        {"sender": m.sender, "message": m.message}
+        {
+            "id": m.id,
+            "sender": m.sender,
+            "message": m.message,
+            "timestamp": m.timestamp.isoformat()
+        }
         for m in msgs
     ])
 
@@ -371,11 +394,8 @@ def group_chat(id):
 
 if __name__ == "__main__":
     with app.app_context():
-        # If you're switching from string-based sender/receiver to integers,
-        # you MUST reset the DB (drop_all + create_all) to update column types.
-        # Uncomment the next line to reset the DB (this will erase existing data):
+        # Use this once only if you changed table structure
         # db.drop_all()
-
         db.create_all()
 
     app.run(debug=True)
